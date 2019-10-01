@@ -1,3 +1,4 @@
+#!/bin/bash
 # Copyright 2019 Google, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,10 +12,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#!/bin/bash
 
 readonly MY_CLUSTER_NAME="$(/usr/share/google/get_metadata_value attributes/dataproc-cluster-name)"
 readonly MY_REGION="$(/usr/share/google/get_metadata_value attributes/dataproc-region)"
+readonly MAX_IDLE_SECONDS_KEY="${MY_CLUSTER_NAME}_maxIdleSeconds"
 readonly IS_IDLE_STATUS_KEY="${MY_CLUSTER_NAME}_isIdle"
 readonly IS_IDLE_STATUS_SINCE_KEY="${MY_CLUSTER_NAME}_isIdleStatusSince"
 readonly IS_IDLE_STATUS_TRUE="TRUE"
@@ -89,7 +90,7 @@ setIdleStatusIdle() {
 
 shutdownCluster() {
   # Remove the metadata
-  gcloud compute project-info remove-metadata --keys ${IS_IDLE_STATUS_KEY},${IS_IDLE_STATUS_SINCE_KEY}
+  gcloud compute project-info remove-metadata --keys ${IS_IDLE_STATUS_KEY},${IS_IDLE_STATUS_SINCE_KEY},${MAX_IDLE_SECONDS_KEY}
 
   # Shutdown the cluster
   gcloud dataproc clusters delete ${MY_CLUSTER_NAME} --quiet --region=${MY_REGION}
@@ -97,7 +98,7 @@ shutdownCluster() {
 
 function main() {
   echo "Starting Script"
-
+  rightNow=$(($(date +%s%N)/1000000))
   echo "About to call check for active SSH sessions"
   isActiveSSHResult=$(isActiveSSH)
   echo "isActiveSSHResult is ${isActiveSSHResult}"
@@ -109,9 +110,10 @@ function main() {
   if [[ ( $isActiveSSHResult -eq 0 ) && ( $isYarnAppRunningOrJustFinishedResult -eq 0 ) ]]; then
     #Set Stackdriver variable isIdle to TRUE
     isIdleSince=$(setIdleStatusIdle)
-    appMPH=60000
-    currentIdleTime=$(( ($currentTime - $isIdleSince) / $appMPH))
-    if [[ $currentIdleTime -gt 5 ]]; then
+    appSPH=1000
+    currentIdleSeconds=$(( ($currentTime - $isIdleSince) / $appSPH))
+    maxIdleSeconds="$(/usr/share/google/get_metadata_value attributes/${MAX_IDLE_SECONDS_KEY} || echo 'FALSE')"
+    if [[ $currentIdleSeconds -gt $maxIdleSeconds ]]; then
       shutdownCluster
     fi
   else
