@@ -24,7 +24,7 @@ In the future, we hope to add support for other analytical engines and/or proces
 ## Usage
 ------------------------------------------------------
 
-Step 1: Copy scripts to a Cloud Storage bucket
+Preparation: Copy scripts to a Cloud Storage bucket
 
 Download all artifacts from Git:
 ```
@@ -35,7 +35,7 @@ Copy all artifacts to Cloud Storage:
 gsutil cp ./dataproc-idle-check/*sh gs://<BUCKET>
 ```
 
-Step 2: Start the cluster specifying key parameters
+Cluster start: Start the cluster specifying key parameters
 
 When starting a cluster, specify (1) the location of the IsIdleJob.sh script to be included as an initialization action, (2) the location of the IsIdle.sh script, and (3) the maximum idle time to allow the cluster to be idle. The IsIdleJob.sh script should be specified with the “--initialization-actions” parameter. The location of the IsIdle.sh script and the maximum idle time should be specified as metadata using the “script_storage_location” and “max-idle” keys, respectively.
 
