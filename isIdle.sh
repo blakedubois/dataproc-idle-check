@@ -16,10 +16,12 @@
 readonly MY_CLUSTER_NAME="$(/usr/share/google/get_metadata_value attributes/dataproc-cluster-name)"
 readonly MY_REGION="$(/usr/share/google/get_metadata_value attributes/dataproc-region)"
 readonly MAX_IDLE_SECONDS_KEY="${MY_CLUSTER_NAME}_maxIdleSeconds"
+readonly DATAPROC_PERSIST_DIAG_TARBALL_KEY="${MY_CLUSTER_NAME}_persistDiagnosticTarball"
 readonly IS_IDLE_STATUS_KEY="${MY_CLUSTER_NAME}_isIdle"
 readonly IS_IDLE_STATUS_SINCE_KEY="${MY_CLUSTER_NAME}_isIdleStatusSince"
 readonly IS_IDLE_STATUS_TRUE="TRUE"
 readonly IS_IDLE_STATUS_FALSE="FALSE"
+readonly PERSIST_DIAG_TARBALL_TRUE="TRUE"
 
 isActiveSSH()
 {
@@ -89,11 +91,31 @@ setIdleStatusIdle() {
 }
 
 shutdownCluster() {
+  # Write out diagnostics if requested
+  persistDiagnosticTarball="$(/usr/share/google/get_metadata_value attributes/${DATAPROC_PERSIST_DIAG_TARBALL_KEY} || echo 'FALSE')"
+  if [[ "$persistDiagnosticTarball" == "${PERSIST_DIAG_TARBALL_TRUE}"  ]]; then
+    gcloud dataproc clusters diagnose ${MY_CLUSTER_NAME} --region=${MY_REGION}
+  fi
+      
   # Remove the metadata
-  gcloud compute project-info remove-metadata --keys ${IS_IDLE_STATUS_KEY},${IS_IDLE_STATUS_SINCE_KEY},${MAX_IDLE_SECONDS_KEY}
+  gcloud compute project-info remove-metadata --keys ${IS_IDLE_STATUS_KEY},${IS_IDLE_STATUS_SINCE_KEY},${MAX_IDLE_SECONDS_KEY},${DATAPROC_PERSIST_DIAG_TARBALL_KEY}
 
   # Shutdown the cluster
   gcloud dataproc clusters delete ${MY_CLUSTER_NAME} --quiet --region=${MY_REGION}
+}
+
+checkForClusterError()
+{
+  local isClusterErrorResult=0
+  # Fetch clusters with this name and a status of ERROR
+  clusterList=$( gcloud dataproc clusters list --region=${MY_REGION} --filter="clusterName = ${MY_CLUSTER_NAME} AND status.state = ERROR" | grep ERROR )
+
+  if [[ -n $clusterList ]]; then
+    # the cluster is in an error state
+    isClusterErrorResult=1
+  fi
+
+  echo "$isClusterErrorResult"
 }
 
 function main() {
@@ -107,7 +129,11 @@ function main() {
   echo "YARN results are ${isYarnAppRunningOrJustFinishedResult}"
   currentTime=$(($(date +%s%N)/1000000))
 
-  if [[ ( $isActiveSSHResult -eq 0 ) && ( $isYarnAppRunningOrJustFinishedResult -eq 0 ) ]]; then
+  # First check the state of the cluster and shutdown if appropriate. Otherwise check for an idle cluster.
+  isClusterError=$(checkForClusterError)
+  if [[ ( $isClusterError -eq 1 ) ]]; then
+    shutdownCluster
+  elif [[ ( $isActiveSSHResult -eq 0 ) && ( $isYarnAppRunningOrJustFinishedResult -eq 0 ) ]]; then
     #Set Stackdriver variable isIdle to TRUE
     isIdleSince=$(setIdleStatusIdle)
     appSPH=1000
@@ -121,6 +147,6 @@ function main() {
     echo $( gcloud compute project-info add-metadata --metadata ${IS_IDLE_STATUS_KEY}=${IS_IDLE_STATUS_FALSE},${IS_IDLE_STATUS_SINCE_KEY}=${currentTime})
   fi
 
-  exit 1
+  exit 0
 }
 main "$@"

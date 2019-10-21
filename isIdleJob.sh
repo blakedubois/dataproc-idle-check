@@ -15,7 +15,10 @@
 
 readonly MY_CLUSTER_NAME="$(/usr/share/google/get_metadata_value attributes/dataproc-cluster-name)"
 readonly MAX_IDLE_SECONDS_KEY="${MY_CLUSTER_NAME}_maxIdleSeconds"
+readonly DATAPROC_PERSIST_DIAG_TARBALL_KEY="${MY_CLUSTER_NAME}_persistDiagnosticTarball"
 readonly ROLE=$(/usr/share/google/get_metadata_value attributes/dataproc-role)
+readonly PERSIST_DIAG_TARBALL_TRUE="TRUE"
+readonly PERSIST_DIAG_TARBALL_FALSE="FALSE"
 
 function checkMaster() {
   local role="$(/usr/share/google/get_metadata_value attributes/dataproc-role)"
@@ -30,6 +33,7 @@ function startIdleJobChecker() {
   # check if bucket and has been passed
   local SCRIPT_STORAGE_LOCATION=$(/usr/share/google/get_metadata_value attributes/script_storage_location)
   local MAX_IDLE_PARAMETER=$(/usr/share/google/get_metadata_value attributes/max-idle)
+  local DATAPROC_PERSIST_DIAG_TARBALL=$(/usr/share/google/get_metadata_value attributes/persist_diagnostic_tarball)
   echo "attempting to start idle checker using: ${SCRIPT_STORAGE_LOCATION}"
   if [[ -n ${SCRIPT_STORAGE_LOCATION} ]]; then
     
@@ -56,8 +60,16 @@ function startIdleJobChecker() {
           ;;
       esac
 
-      # Record the value as instance metadata
+      # Record the max seconds value as instance metadata
       echo $( gcloud compute project-info add-metadata --metadata ${MAX_IDLE_SECONDS_KEY}=${idleTimeAmountSeconds})
+
+      # Record preference for persisting diagnostic information on cluster shutdown
+      persistDiagnosticTarball=${PERSIST_DIAG_TARBALL_FALSE}
+      parsedPesistDiagnosticTarballParameter=$(echo ${DATAPROC_PERSIST_DIAG_TARBALL} | sed -n '/\(TRUE\|true\)/p' )
+      if [[ -n ${parsedPesistDiagnosticTarballParameter} ]]; then
+        persistDiagnosticTarball=${PERSIST_DIAG_TARBALL_TRUE}
+      fi
+      echo $( gcloud compute project-info add-metadata --metadata ${DATAPROC_PERSIST_DIAG_TARBALL_KEY}=${persistDiagnosticTarball})
 
       echo "establishing isIdle process to determine when master node can be deleted"
       cd /root
@@ -72,7 +84,7 @@ function startIdleJobChecker() {
       ./isIdle.sh
 
       #sudo bash -c 'echo "" >> /etc/crontab'
-      sudo bash -c 'echo "*/2 * * * * root /root/DataprocShutdown/isIdle.sh" >> /etc/crontab'
+      sudo bash -c 'echo "*/5 * * * * root /root/DataprocShutdown/isIdle.sh" >> /etc/crontab'
     else
       echo "Must provide value for 'max-idle' The duration from the moment when the cluster enters the idle state to the moment when the cluster starts to delete. Provide the duration in IntegerUnit format, where the unit can be 's, m, h, d' (seconds, minutes, hours, days, respectively)."
       exit 1;
