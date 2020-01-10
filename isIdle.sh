@@ -46,6 +46,16 @@ isActiveSSH()
            fi
          fi
        done
+
+    # check to see if any key processes (e.g., python) are running
+     processes=`(w | awk 'NR > 2 { print $8 }')`
+     for i in $processes
+       do
+         if [[ $i == "python" ]]; then
+           isActiveSSHSession=1
+           break
+         fi
+       done
    fi
    echo "$isActiveSSHSession"
 }
