@@ -26,6 +26,8 @@ readonly PERSIST_DIAG_TARBALL_TRUE="TRUE"
 isActiveSSH()
 {
    local isActiveSSHSession=0
+   woutput=$( w )
+   gcloud logging write idle-check-log "${MY_CLUSTER_NAME} (SSH Session Check): ${woutput}" --severity=NOTICE
    woutrow=`(w | wc -l)`
    if [[ "$woutrow" -gt 2 ]]; then
      sec=`(w | awk 'NR > 2 { print $5 }')`
@@ -35,10 +37,10 @@ isActiveSSH()
            isActiveSSHSession=1
            break
          elif [[ $i == *:*m ]]; then
-				   continue
+   				   continue
          elif [[ $i == *:* ]]; then
            arrTime=(${i//:/ })
-           if [[ "${arrTime[0]}"  -lt 10 ]]; then
+           if [[ "${arrTime[0]}"  -lt 30 ]]; then
              isActiveSSHSession=1
              break
            fi
@@ -52,17 +54,18 @@ yarnAppsRunningOrJustFinished()
 {
   local isYarnAppRunningOrJustFinishedResult=0
   appNames=$( curl -s "http://localhost:8088/ws/v1/cluster/apps?state=RUNNING"| grep -Po '"name":.*?[^\\]",')
-
+  gcloud logging write idle-check-log "${MY_CLUSTER_NAME} (Active YARN Job Check): ${appNames}" --severity=NOTICE
   if [[ -n $appNames ]]; then
     # something is running
     isYarnAppRunningOrJustFinishedResult=1
   else
     jobFinishedTime=$( curl -s "http://localhost:8088/ws/v1/cluster/apps?state=FINISHED"|grep -Po '"finishedTime":.*?[^\\]"' | sort | tail -n 1 | sed 's/\"finishedTime\":\(.*\),\"/\1/' )
+    gcloud logging write idle-check-log "${MY_CLUSTER_NAME} (Recently Completed YARN Job Check): ${jobFinishedTime}" --severity=NOTICE
     if [[ -n $jobFinishedTime ]]; then
       currentTime=$(($(date +%s%N)/1000000))
       appMPH=60000
       idleTime=$(( ($currentTime - $jobFinishedTime) / $appMPH ))
-      if [[ $idleTime -lt 5 ]]; then
+      if [[ $idleTime -lt 30 ]]; then
         isYarnAppRunningOrJustFinishedResult=1
       fi
     fi
@@ -91,6 +94,8 @@ setIdleStatusIdle() {
 }
 
 shutdownCluster() {
+  gcloud logging write idle-check-log "${MY_CLUSTER_NAME}: Shutting Down Cluster" --severity=NOTICE
+  
   # Write out diagnostics if requested
   persistDiagnosticTarball="$(/usr/share/google/get_metadata_value attributes/${DATAPROC_PERSIST_DIAG_TARBALL_KEY} || echo 'FALSE')"
   if [[ "$persistDiagnosticTarball" == "${PERSIST_DIAG_TARBALL_TRUE}"  ]]; then
@@ -123,18 +128,22 @@ function main() {
   rightNow=$(($(date +%s%N)/1000000))
   echo "About to call check for active SSH sessions"
   isActiveSSHResult=$(isActiveSSH)
+  gcloud logging write idle-check-log "${MY_CLUSTER_NAME} (Active SSH Session): ${isActiveSSHResult}" --severity=NOTICE
   echo "isActiveSSHResult is ${isActiveSSHResult}"
   echo "About to call check for active/recent YARN jobs"
   isYarnAppRunningOrJustFinishedResult=$(yarnAppsRunningOrJustFinished)
+  gcloud logging write idle-check-log "${MY_CLUSTER_NAME} (Active/Recent YARN Jobs): ${isYarnAppRunningOrJustFinishedResult}" --severity=NOTICE
   echo "YARN results are ${isYarnAppRunningOrJustFinishedResult}"
   currentTime=$(($(date +%s%N)/1000000))
 
   # First check the state of the cluster and shutdown if appropriate. Otherwise check for an idle cluster.
   isClusterError=$(checkForClusterError)
   if [[ ( $isClusterError -eq 1 ) ]]; then
+    gcloud logging write idle-check-log "${MY_CLUSTER_NAME}: Cluster Error" --severity=NOTICE
     shutdownCluster
   elif [[ ( $isActiveSSHResult -eq 0 ) && ( $isYarnAppRunningOrJustFinishedResult -eq 0 ) ]]; then
-    #Set Stackdriver variable isIdle to TRUE
+    gcloud logging write idle-check-log "${MY_CLUSTER_NAME}: Cluster Is IDLE" --severity=NOTICE
+    #Set project metadata variable isIdle to TRUE
     isIdleSince=$(setIdleStatusIdle)
     appSPH=1000
     currentIdleSeconds=$(( ($currentTime - $isIdleSince) / $appSPH))
@@ -144,6 +153,7 @@ function main() {
     fi
   else
     echo "Considering cluster ${MY_CLUSTER_NAME}  as active"
+    gcloud logging write idle-check-log "${MY_CLUSTER_NAME}: Cluster Is ACTIVE" --severity=NOTICE
     echo $( gcloud compute project-info add-metadata --metadata ${IS_IDLE_STATUS_KEY}=${IS_IDLE_STATUS_FALSE},${IS_IDLE_STATUS_SINCE_KEY}=${currentTime})
   fi
 
