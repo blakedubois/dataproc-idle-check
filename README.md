@@ -51,6 +51,10 @@ gcloud dataproc clusters create hive-cluster-1 --master-machine-type n1-standard
 
 Once started, the monitor script will continuously check to determine if the cluster is idle. The scrip will also check the cluster status to ensure it is not in an error state (e.g, one or more initialization actions exited with a non zero result). If the cluster is in an error state or has idled for a time greater than the duration specified at cluster start, the script will delete the cluster and the associated project metadata.
 
+## Logging
+
+The monitor script will continously log all idle checks and shutdown events via Stackdriver logging to a file called "idle-check-log". This log can be viewed in the Google Cloud Platform console under Monitoring->Logging->(Search for the log name of 'idle-check-log')
+
 ## License
 [APACHE LICENSE, VERSION 2.0](./LICENSE)
 
